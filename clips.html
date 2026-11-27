@@ -73,10 +73,21 @@ button:disabled{opacity:.45}
   <div class="note" id="nextS"></div>
 </div>
 
+<div class="card" id="bulk" style="display:none">
+  <div class="note"><b>للنشر التلقائي:</b> احفظ كل الأجزاء على موبايلك، وبعدين ارفعهم في جدولة تيك توك أو Buffer بالمواعيد والكابشنات اللي تحت.</div>
+  <div class="btns" style="margin-top:10px">
+    <button id="saveAll">💾 احفظ كل الأجزاء</button>
+    <button class="sec" id="copySched">📋 انسخ جدول المواعيد والكابشنات</button>
+  </div>
+  <div class="btns" style="margin-top:8px">
+    <a href="https://buffer.com" target="_blank" rel="noopener" style="flex:1"><button class="sec" style="width:100%">افتح Buffer</button></a>
+    <a href="https://www.tiktok.com/tiktokstudio/upload" target="_blank" rel="noopener" style="flex:1"><button class="sec" style="width:100%">TikTok Studio</button></a>
+  </div>
+</div>
 <div class="card" id="list" style="display:none"></div>
 
 <div class="card note">
-  <b>عن النشر على تيك توك:</b> تيك توك مبيسمحش بالنشر التلقائي لحساب شخصي. واجهة النشر عندهم محتاجة موافقة مراجعة، وبترفض أدوات النشر لحساب واحد، وأي نشر قبل الموافقة بيطلع خاص (أنت لوحدك). عشان كده كل جزء هنا فيه زرار «انشر»: بيفتح قائمة المشاركة في موبايلك، اختار تيك توك، والفيديو والكابشن يتجهزوا. والمواعيد بتفكّرك لما الجزء ييجي ميعاده. الصفحة لازم تفضل مفتوحة عشان التذكير يشتغل.
+  <b>النشر التلقائي:</b> تيك توك مبيسمحش بنشر تلقائي من موقع شخصي. الطريقة المعتمدة إنك تجدول من تطبيق تيك توك ستوديو أو من Buffer (مجاني)، وهما اللي بينشروا في الميعاد. استخدم زرار «احفظ كل الأجزاء» وبعدين ارفعهم هناك بالمواعيد دي.
 </div>
 
 <script>
@@ -140,7 +151,7 @@ $('go').onclick=async()=>{
 };
 
 function render(){
-  const L=$('list'); L.style.display=clips.length?'block':'none';
+  const L=$('list'); L.style.display=clips.length?'block':'none'; $('bulk').style.display=clips.length?'block':'none';
   L.innerHTML='';
   clips.forEach((c,idx)=>{
     const d=document.createElement('div'); d.className='clip'+(c.done?' done':'');
@@ -168,6 +179,16 @@ async function share(c){
   dl(c); flash('الموبايل مش بيدعم المشاركة المباشرة. نزّلت الفيديو، افتح تيك توك وارفعه والصق الكابشن (منسوخ).');
 }
 
+$('saveAll').onclick=async()=>{
+  const fs=clips.map(c=>new File([c.blob],fname(c),{type:'video/mp4'}));
+  if(navigator.canShare&&navigator.canShare({files:fs})){try{await navigator.share({files:fs,title:'أجزاء '+$('ep').value});flash('اختار حفظ في الملفات أو الصور.');return}catch(e){if(e.name==='AbortError')return}}
+  for(const c of clips){dl(c);await new Promise(r=>setTimeout(r,800))}
+  flash('بدأ تحميل كل الأجزاء. لو المتصفح سأل عن السماح بتحميلات متعددة وافق.');
+};
+$('copySched').onclick=async()=>{
+  const t=clips.map(c=>'الجزء '+c.n+' | '+c.at.toLocaleString('ar-EG')+'\n'+c.caption).join('\n\n');
+  try{await navigator.clipboard.writeText(t);flash('اتنسخ الجدول.')}catch(e){flash('تعذر النسخ.')}
+};
 let notified={};
 function tick(){
   const nx=clips.find(c=>!c.done);
