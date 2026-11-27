@@ -205,7 +205,7 @@ function render(){
     const d=document.createElement('div'); d.className='clip'+(c.done?' done':'');
     d.innerHTML='<h3>الجزء '+c.n+(c.done?'<span class="badge">اتنشر</span>':'')+'</h3><div class="when">⏰ '+fmtAt(c.at)+'</div><div class="cap"></div><video controls playsinline preload="metadata"></video><div class="btns"></div>';
     d.querySelector('.cap').textContent=c.caption;
-    d.querySelector('video').src=c.url;
+    d.querySelector('video').src=c.url+'#t=0.1';
     const b=d.querySelector('.btns');
     const mk=(t,cls,fn)=>{const x=document.createElement('button');x.textContent=t;if(cls)x.className=cls;x.onclick=fn;b.appendChild(x)};
     mk('📤 انشر على تيك توك','',()=>share(c));
