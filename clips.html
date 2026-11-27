@@ -21,6 +21,7 @@ button{font:inherit;font-weight:700;border:0;border-radius:12px;padding:12px 14p
 button.sec{background:#1c2548;color:var(--txt);border:1px solid var(--line)}
 button.ok{background:var(--ok);color:#06251a}
 button:disabled{opacity:.45}
+.chk{display:flex;gap:8px;align-items:flex-start;color:var(--txt);font-size:14px;margin:10px 0 0}.chk input{width:20px;height:20px;flex:none;margin-top:2px}
 .big{width:100%;margin-top:14px;padding:14px;font-size:17px}
 .file{border:2px dashed var(--line);border-radius:14px;padding:20px;text-align:center;color:var(--muted);cursor:pointer;display:block;margin:0}
 .file b{color:var(--gold)}
@@ -59,11 +60,18 @@ button:disabled{opacity:.45}
     <div><label>نزّل جزء كل (ساعة)</label><input id="gap" type="number" inputmode="decimal" value="5" min="0.1" step="0.5"></div>
     <div><label>أول جزء الساعة</label><input id="first" type="datetime-local"></div>
   </div>
+  <div class="row" style="margin-top:6px">
+    <div><label>بداية القص من ثانية</label><input id="off" type="number" inputmode="numeric" value="0" min="0"></div>
+    <div><label>دمج آخر جزء لو أقل من (ثانية)</label><input id="tail" type="number" inputmode="numeric" value="10" min="0"></div>
+  </div>
+  <label class="chk"><input type="checkbox" id="vert" checked> شكل طولي 9:16 مناسب لتيك توك (الفيديو العريض يتحط على خلفية مغبّشة)</label>
+  <label class="chk"><input type="checkbox" id="burn" checked> اكتب «الجزء N» واسم الحلقة على الفيديو نفسه</label>
   <label>شكل الكابشن ({n} = رقم الجزء، {ep} = اسم الحلقة، {total} = عدد الأجزاء)</label>
   <textarea id="tpl" rows="2">الجزء {n} | {ep}
 #fyp #foryou</textarea>
   <button class="big" id="go" disabled>قطّع الفيديو</button>
   <div class="bar"><i id="pg"></i></div>
+  <div class="msg" style="color:#cfd5f2">القص على الموبايل أبطأ من الكمبيوتر (ممكن دقايق لكل جزء). سيب الشاشة مفتوحة والصفحة قدامك لحد ما يخلص.</div>
   <div class="msg" id="msg">اختار فيديو الأول.</div>
 </div>
 
@@ -78,6 +86,7 @@ button:disabled{opacity:.45}
   <div class="btns" style="margin-top:10px">
     <button id="saveAll">💾 احفظ كل الأجزاء</button>
     <button class="sec" id="copySched">📋 انسخ جدول المواعيد والكابشنات</button>
+    <button class="sec" id="clearAll">🗑️ امسح المحفوظ</button>
   </div>
   <div class="btns" style="margin-top:8px">
     <a href="https://buffer.com" target="_blank" rel="noopener" style="flex:1"><button class="sec" style="width:100%">افتح Buffer</button></a>
@@ -95,8 +104,23 @@ const $=id=>document.getElementById(id);
 const pad=n=>String(n).padStart(2,'0');
 function toLocal(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())}
 $('first').value=toLocal(new Date());
-let clips=[]; // {n,blob,url,caption,at(Date),done}
-let file=null, ff=null;
+let clips=[]; let file=null, ff=null;
+
+/* ---------- storage (IndexedDB for clips, localStorage for settings) ---------- */
+const IDS=['ep','len','start','gap','first','off','tail','tpl'];
+function saveSettings(){const o={};IDS.forEach(k=>o[k]=$(k).value);o.vert=$('vert').checked;o.burn=$('burn').checked;try{localStorage.setItem('clipsCfg',JSON.stringify(o))}catch(e){}}
+function loadSettings(){try{const o=JSON.parse(localStorage.getItem('clipsCfg')||'{}');IDS.forEach(k=>{if(o[k]!=null&&o[k]!=='')$(k).value=o[k]});if('vert' in o)$('vert').checked=o.vert;if('burn' in o)$('burn').checked=o.burn}catch(e){}}
+loadSettings();
+[...IDS,'vert','burn'].forEach(k=>$(k).addEventListener('change',()=>{saveSettings();sync()}));
+function sync(){$('burn').disabled=!$('vert').checked;}
+sync();
+let db=null;
+function idb(){return new Promise((res,rej)=>{if(db)return res(db);const r=indexedDB.open('clipsdb',1);r.onupgradeneeded=()=>r.result.createObjectStore('clips',{keyPath:'n'});r.onsuccess=()=>{db=r.result;res(db)};r.onerror=()=>rej(r.error)})}
+async function dbPut(c){try{const d=await idb();await new Promise((res,rej)=>{const t=d.transaction('clips','readwrite');t.objectStore('clips').put({n:c.n,blob:c.blob,caption:c.caption,at:c.at.getTime(),done:c.done});t.oncomplete=res;t.onerror=()=>rej(t.error)})}catch(e){console.warn('idb',e)}}
+async function dbClear(){try{const d=await idb();await new Promise(res=>{const t=d.transaction('clips','readwrite');t.objectStore('clips').clear();t.oncomplete=res;t.onerror=res})}catch(e){}}
+async function dbAll(){try{const d=await idb();return await new Promise(res=>{const r=d.transaction('clips').objectStore('clips').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>res([])})}catch(e){return[]}}
+(async()=>{const all=(await dbAll()).sort((a,b)=>a.n-b.n);if(all.length){clips=all.map(r=>({n:r.n,blob:r.blob,url:URL.createObjectURL(r.blob),caption:r.caption,at:new Date(r.at),done:r.done}));render();tick();$('msg').textContent='رجّعت '+clips.length+' جزء محفوظ من المرة اللي فاتت.'}
+ if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()})();
 
 $('file').onchange=e=>{
   file=e.target.files[0]; if(!file)return;
@@ -109,16 +133,29 @@ $('file').onchange=e=>{
 function fmtDur(ms){ if(ms<=0)return 'دلوقتي'; let s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60); s%=60; return pad(h)+':'+pad(m)+':'+pad(s);}
 function fmtAt(d){return d.toLocaleString('ar-EG',{weekday:'long',hour:'numeric',minute:'2-digit',day:'numeric',month:'long'});}
 function caption(n,total){return $('tpl').value.replaceAll('{n}',n).replaceAll('{ep}',$('ep').value.trim()).replaceAll('{total}',total);}
-
 async function getDuration(f){
   return new Promise(res=>{const v=document.createElement('video');v.preload='metadata';v.onloadedmetadata=()=>{res(v.duration);URL.revokeObjectURL(v.src)};v.onerror=()=>res(0);v.src=URL.createObjectURL(f)});
 }
 
+/* caption overlay drawn by the browser (correct Arabic shaping), then burned in by ffmpeg */
+async function capPng(n,total,ep){
+  try{await document.fonts.load('800 40px Cairo');await document.fonts.load('700 34px Cairo')}catch(e){}
+  const W=720,H=1280,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.direction='rtl';x.textAlign='center';x.textBaseline='middle';
+  const rr=(a,b,w,h,r)=>{x.beginPath();x.moveTo(a+r,b);x.arcTo(a+w,b,a+w,b+h,r);x.arcTo(a+w,b+h,a,b+h,r);x.arcTo(a,b+h,a,b,r);x.arcTo(a,b,a+w,b,r);x.closePath()};
+  const t1='الجزء '+n;x.font='800 44px Cairo, Tahoma, sans-serif';const w1=x.measureText(t1).width+60;
+  rr((W-w1)/2,150,w1,72,36);x.fillStyle='#f5c451';x.fill();x.fillStyle='#14110a';x.fillText(t1,W/2,187);
+  x.font='700 34px Cairo, Tahoma, sans-serif';let t2=ep;while(x.measureText(t2).width>W-100&&t2.length>4)t2=t2.slice(0,-2);if(t2!==ep)t2+='…';
+  const w2=x.measureText(t2).width+50;rr((W-w2)/2,236,w2,60,30);x.fillStyle='rgba(0,0,0,.55)';x.fill();x.fillStyle='#fff';x.fillText(t2,W/2,267);
+  const b=await new Promise(r=>c.toBlob(r,'image/png'));return new Uint8Array(await b.arrayBuffer());
+}
+
 $('go').onclick=async()=>{
   if(!file)return;
-  const len=Math.max(5,+$('len').value||60), start=Math.max(1,+$('start').value||1), gapH=+$('gap').value||5;
+  const len=Math.max(5,+$('len').value||60), start=Math.max(1,+$('start').value||1), gapH=+$('gap').value||5, off=Math.max(0,+$('off').value||0), tailMin=Math.max(0,+$('tail').value||0);
+  const vert=$('vert').checked, burn=vert&&$('burn').checked;
   const t0=new Date($('first').value||Date.now());
-  $('go').disabled=true; clips.forEach(c=>URL.revokeObjectURL(c.url)); clips=[];
+  if(clips.length && !confirm('ده هيمسح الأجزاء المحفوظة حالياً ويقطّع من جديد. تكمل؟'))return;
+  $('go').disabled=true; saveSettings(); try{window._wl=await navigator.wakeLock.request('screen')}catch(e){} clips.forEach(c=>URL.revokeObjectURL(c.url)); clips=[]; render(); await dbClear();
   try{
     $('msg').textContent='بحمّل أداة القص (أول مرة بتاخد دقيقة)…';
     if(!ff){ff=FFmpeg.createFFmpeg({log:false,corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'});
@@ -128,25 +165,36 @@ $('go').onclick=async()=>{
     const ext=(file.name.split('.').pop()||'mp4').toLowerCase().replace(/[^a-z0-9]/g,'')||'mp4';
     $('msg').textContent='بقرا الفيديو…';
     ff.FS('writeFile','in.'+ext,new Uint8Array(await file.arrayBuffer()));
-    const total=dur?Math.ceil(dur/len):1;
+    const span=Math.max(1,(dur||len)-off);
+    let total=dur?Math.ceil(span/len):1;
+    if(total>1 && span-(total-1)*len<tailMin) total--;   // short tail merges into the previous part
+    const shown=start+total-1;
     for(let i=0;i<total;i++){
       window._cur={i,t:total};
       $('msg').textContent='بقطّع الجزء '+(i+1)+' من '+total+'…';
-      const out='o'+i+'.mp4';
-      // re-encode so every part is exactly len seconds and starts clean
-      await ff.run('-ss',String(i*len),'-i','in.'+ext,'-t',String(len),'-c:v','libx264','-preset','ultrafast','-crf','26','-c:a','aac','-movflags','+faststart','-y',out);
+      const n=start+i, out='o'+i+'.mp4', ss=off+i*len, tl=(i===total-1)?Math.max(len,span-i*len):len;
+      const base=['-ss',String(ss),'-i','in.'+ext];
+      let args;
+      if(vert){
+        const bg='[0:v]scale=72:128:force_original_aspect_ratio=increase,crop=72:128,boxblur=3:1,scale=720:1280,setsar=1[bg];[0:v]scale=720:1280:force_original_aspect_ratio=decrease,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p';
+        if(burn){ff.FS('writeFile','cap.png',await capPng(n,shown,$('ep').value.trim()));
+          args=[...base,'-i','cap.png','-filter_complex',bg+'[v0];[v0][1:v]overlay=0:0[v]','-map','[v]','-map','0:a?'];}
+        else args=[...base,'-filter_complex',bg+'[v]','-map','[v]','-map','0:a?'];
+      } else args=[...base];
+      args.push('-t',String(tl),'-r','30','-c:v','libx264','-preset','ultrafast','-crf','27','-c:a','aac','-b:a','128k','-movflags','+faststart','-y',out);
+      await ff.run(...args);
       const data=ff.FS('readFile',out); ff.FS('unlink',out);
       const blob=new Blob([data.buffer],{type:'video/mp4'});
-      const n=start+i;
-      clips.push({n,blob,url:URL.createObjectURL(blob),caption:caption(n,start+total-1),at:new Date(t0.getTime()+i*gapH*3600e3),done:false});
-      render();
+      const c={n,blob,url:URL.createObjectURL(blob),caption:caption(n,shown),at:new Date(t0.getTime()+i*gapH*3600e3),done:false};
+      clips.push(c); await dbPut(c); render();
     }
     try{ff.FS('unlink','in.'+ext)}catch(e){}
-    $('pg').style.width='100%'; $('msg').textContent='خلص ✅ '+total+' جزء. كل جزء تحت بكابشنه ومعاده.';
+    $('pg').style.width='100%'; $('msg').textContent='خلص ✅ '+total+' جزء، ومحفوظين على موبايلك حتى لو قفلت الصفحة.';
     if('Notification' in window && Notification.permission==='default') Notification.requestPermission();
   }catch(e){
     $('msg').textContent='حصل خطأ: '+(e.message||e)+' . جرّب فيديو أصغر أو أعد المحاولة.';
   }
+  try{window._wl&&window._wl.release()}catch(e){}
   $('go').disabled=false;
 };
 
@@ -163,7 +211,7 @@ function render(){
     mk('📤 انشر على تيك توك','',()=>share(c));
     mk('⬇️ تحميل','sec',()=>dl(c));
     mk('📋 كابشن','sec',async()=>{try{await navigator.clipboard.writeText(c.caption);flash('اتنسخ الكابشن')}catch(e){flash('انسخه يدوي من فوق')}});
-    mk(c.done?'↩︎ رجّعه':'✔️ تم النشر',c.done?'sec':'ok',()=>{c.done=!c.done;render();tick()});
+    mk(c.done?'↩︎ رجّعه':'✔️ تم النشر',c.done?'sec':'ok',()=>{c.done=!c.done;dbPut(c);render();tick()});
     L.appendChild(d);
   });
 }
@@ -178,7 +226,6 @@ async function share(c){
   }
   dl(c); flash('الموبايل مش بيدعم المشاركة المباشرة. نزّلت الفيديو، افتح تيك توك وارفعه والصق الكابشن (منسوخ).');
 }
-
 $('saveAll').onclick=async()=>{
   const fs=clips.map(c=>new File([c.blob],fname(c),{type:'video/mp4'}));
   if(navigator.canShare&&navigator.canShare({files:fs})){try{await navigator.share({files:fs,title:'أجزاء '+$('ep').value});flash('اختار حفظ في الملفات أو الصور.');return}catch(e){if(e.name==='AbortError')return}}
@@ -189,6 +236,8 @@ $('copySched').onclick=async()=>{
   const t=clips.map(c=>'الجزء '+c.n+' | '+c.at.toLocaleString('ar-EG')+'\n'+c.caption).join('\n\n');
   try{await navigator.clipboard.writeText(t);flash('اتنسخ الجدول.')}catch(e){flash('تعذر النسخ.')}
 };
+$('clearAll').onclick=async()=>{ if(!confirm('تمسح كل الأجزاء المحفوظة؟'))return; clips.forEach(c=>URL.revokeObjectURL(c.url)); clips=[]; await dbClear(); render(); tick(); flash('اتمسحت.')};
+
 let notified={};
 function tick(){
   const nx=clips.find(c=>!c.done);
